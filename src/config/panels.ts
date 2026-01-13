@@ -9,6 +9,9 @@ export const DEFAULT_PANELS: Record<string, PanelConfig> = {
   'live-news': { name: 'Live News', enabled: true, priority: 1 },
   intel: { name: 'Intel Feed', enabled: true, priority: 1 },
   'gdelt-intel': { name: 'Live Intelligence', enabled: true, priority: 1 },
+  cii: { name: 'Country Instability', enabled: true, priority: 1 },
+  cascade: { name: 'Infrastructure Cascade', enabled: true, priority: 1 },
+  'strategic-risk': { name: 'Strategic Risk Overview', enabled: true, priority: 1 },
   politics: { name: 'World News', enabled: true, priority: 1 },
   middleeast: { name: 'Middle East', enabled: true, priority: 1 },
   gov: { name: 'Government', enabled: true, priority: 1 },
@@ -36,7 +39,6 @@ export const DEFAULT_MAP_LAYERS: MapLayers = {
   nuclear: true,
   irradiators: false,
   sanctions: true,
-  earthquakes: true,
   weather: true,
   economic: true,
   countries: true,
@@ -46,6 +48,7 @@ export const DEFAULT_MAP_LAYERS: MapLayers = {
   protests: true,
   flights: false,
   military: false,
+  natural: true,
 };
 
 // Mobile-specific defaults: minimal layers for better usability
@@ -59,7 +62,6 @@ export const MOBILE_DEFAULT_MAP_LAYERS: MapLayers = {
   nuclear: false,
   irradiators: false,
   sanctions: false,
-  earthquakes: false,
   weather: false,
   economic: false,
   countries: false,
@@ -69,6 +71,7 @@ export const MOBILE_DEFAULT_MAP_LAYERS: MapLayers = {
   protests: false,
   flights: false,
   military: false,
+  natural: false,
 };
 
 export const MONITOR_COLORS = [

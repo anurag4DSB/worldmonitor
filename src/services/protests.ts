@@ -170,7 +170,7 @@ async function fetchGdeltEvents(): Promise<SocialUnrestEvent[]> {
       if (!name || seenLocations.has(name)) continue;
 
       const count = feature.properties.count || 1;
-      if (count < 200) continue;
+      if (count < 5) continue; // Filter noise but keep meaningful events
 
       seenLocations.add(name);
 
@@ -279,6 +279,9 @@ export async function fetchProtestEvents(): Promise<ProtestData> {
   ]);
 
   console.log(`[Protests] Fetched ${acledEvents.length} ACLED, ${gdeltEvents.length} GDELT events`);
+
+  // Note: Data freshness is recorded in App.ts AFTER ingestProtestsForCII()
+  // to avoid race conditions where the Strategic Risk panel refreshes before CII data is ingested
 
   // Combine and deduplicate
   const allEvents = deduplicateEvents([...acledEvents, ...gdeltEvents]);

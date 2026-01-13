@@ -62,6 +62,8 @@ const server = http.createServer(async (req, res) => {
         'rss.cnn.com',
         'www.defensenews.com',
         'layoffs.fyi',
+        'news.un.org',
+        'www.cisa.gov',
       ];
       const parsed = new URL(feedUrl);
       if (!allowedDomains.includes(parsed.hostname)) {
@@ -107,10 +109,22 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: err.message }));
     }
   } else if (req.url.startsWith('/opensky')) {
-    // Proxy OpenSky API requests (Vercel is blocked, Railway isn't)
+    // Proxy OpenSky API requests with OAuth2 authentication
+    // OpenSky blocks unauthenticated cloud IPs, so we need to use credentials
     try {
       const url = new URL(req.url, `http://localhost:${PORT}`);
       const params = url.searchParams;
+
+      // Get OAuth2 credentials from env
+      const clientId = process.env.OPENSKY_CLIENT_ID;
+      const clientSecret = process.env.OPENSKY_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        console.error('[Relay] OpenSky credentials not configured');
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'OpenSky not configured', time: Date.now(), states: [] }));
+        return;
+      }
 
       let openskyUrl = 'https://opensky-network.org/api/states/all';
       const queryParams = [];
@@ -123,11 +137,15 @@ const server = http.createServer(async (req, res) => {
 
       console.log('[Relay] OpenSky request:', openskyUrl);
 
+      // Use Basic Auth with client credentials
+      const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
       const https = require('https');
       const request = https.get(openskyUrl, {
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'WorldMonitor/1.0'
+          'User-Agent': 'WorldMonitor/1.0',
+          'Authorization': `Basic ${auth}`,
         },
         timeout: 15000
       }, (response) => {
@@ -164,21 +182,31 @@ const server = http.createServer(async (req, res) => {
 });
 
 function connectUpstream() {
-  if (upstreamSocket?.readyState === WebSocket.OPEN) return;
+  // Skip if already connected or connecting
+  if (upstreamSocket?.readyState === WebSocket.OPEN ||
+      upstreamSocket?.readyState === WebSocket.CONNECTING) return;
 
   console.log('[Relay] Connecting to aisstream.io...');
-  upstreamSocket = new WebSocket(AISSTREAM_URL);
+  const socket = new WebSocket(AISSTREAM_URL);
+  upstreamSocket = socket;
 
-  upstreamSocket.on('open', () => {
+  socket.on('open', () => {
+    // Verify this socket is still the current one (race condition guard)
+    if (upstreamSocket !== socket) {
+      console.log('[Relay] Stale socket open event, closing');
+      socket.close();
+      return;
+    }
     console.log('[Relay] Connected to aisstream.io');
-    upstreamSocket.send(JSON.stringify({
+    socket.send(JSON.stringify({
       APIKey: API_KEY,
       BoundingBoxes: [[[-90, -180], [90, 180]]],
       FilterMessageTypes: ['PositionReport'],
     }));
   });
 
-  upstreamSocket.on('message', (data) => {
+  socket.on('message', (data) => {
+    if (upstreamSocket !== socket) return; // Stale socket
     messageCount++;
     if (messageCount % 1000 === 0) {
       console.log(`[Relay] ${messageCount} messages, ${clients.size} clients`);
@@ -191,12 +219,15 @@ function connectUpstream() {
     }
   });
 
-  upstreamSocket.on('close', () => {
-    console.log('[Relay] Disconnected, reconnecting in 5s...');
-    setTimeout(connectUpstream, 5000);
+  socket.on('close', () => {
+    if (upstreamSocket === socket) {
+      upstreamSocket = null;
+      console.log('[Relay] Disconnected, reconnecting in 5s...');
+      setTimeout(connectUpstream, 5000);
+    }
   });
 
-  upstreamSocket.on('error', (err) => {
+  socket.on('error', (err) => {
     console.error('[Relay] Upstream error:', err.message);
   });
 }

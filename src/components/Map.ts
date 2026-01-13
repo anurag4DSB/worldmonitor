@@ -2,7 +2,8 @@ import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
 import { escapeHtml } from '@/utils/sanitize';
 import type { Topology, GeometryCollection } from 'topojson-specification';
-import type { MapLayers, Hotspot, NewsItem, Earthquake, InternetOutage, RelatedAsset, AssetType, AisDisruptionEvent, AisDensityZone, CableAdvisory, RepairShip, SocialUnrestEvent, AirportDelayAlert, MilitaryFlight, MilitaryVessel, MilitaryFlightCluster, MilitaryVesselCluster } from '@/types';
+import type { MapLayers, Hotspot, NewsItem, Earthquake, InternetOutage, RelatedAsset, AssetType, AisDisruptionEvent, AisDensityZone, CableAdvisory, RepairShip, SocialUnrestEvent, AirportDelayAlert, MilitaryFlight, MilitaryVessel, MilitaryFlightCluster, MilitaryVesselCluster, NaturalEvent } from '@/types';
+import { getNaturalEventIcon } from '@/services/eonet';
 import type { WeatherAlert } from '@/services/weather';
 import { getSeverityColor } from '@/services/weather';
 import {
@@ -21,11 +22,12 @@ import {
   COUNTRY_LABELS,
   ECONOMIC_CENTERS,
   AI_DATA_CENTERS,
+  PORTS,
 } from '@/config';
 import { MapPopup } from './MapPopup';
 
 export type TimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
-export type MapView = 'global' | 'us' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
+export type MapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
 
 interface MapState {
   zoom: number;
@@ -45,12 +47,6 @@ interface WorldTopology extends Topology {
   };
 }
 
-interface USTopology extends Topology {
-  objects: {
-    states: GeometryCollection;
-  };
-}
-
 export class MapComponent {
   private static readonly LAYER_ZOOM_THRESHOLDS: Partial<
     Record<keyof MapLayers, { minZoom: number; showLabels?: number }>
@@ -59,7 +55,7 @@ export class MapComponent {
     nuclear: { minZoom: 2, showLabels: 4 },
     conflicts: { minZoom: 1, showLabels: 3 },
     economic: { minZoom: 2, showLabels: 4 },
-    earthquakes: { minZoom: 1, showLabels: 2 },
+    natural: { minZoom: 1, showLabels: 2 },
   };
 
   private container: HTMLElement;
@@ -70,7 +66,6 @@ export class MapComponent {
   private clusterGl: WebGLRenderingContext | null = null;
   private state: MapState;
   private worldData: WorldTopology | null = null;
-  private usData: USTopology | null = null;
   private hotspots: HotspotWithBreaking[];
   private earthquakes: Earthquake[] = [];
   private weatherAlerts: WeatherAlert[] = [];
@@ -85,6 +80,7 @@ export class MapComponent {
   private militaryFlightClusters: MilitaryFlightCluster[] = [];
   private militaryVessels: MilitaryVessel[] = [];
   private militaryVesselClusters: MilitaryVesselCluster[] = [];
+  private naturalEvents: NaturalEvent[] = [];
   private news: NewsItem[] = [];
   private popup: MapPopup;
   private onHotspotClick?: (hotspot: Hotspot) => void;
@@ -137,6 +133,23 @@ export class MapComponent {
 
     this.setupZoomHandlers();
     this.loadMapData();
+    this.setupResizeObserver();
+  }
+
+  private setupResizeObserver(): void {
+    let lastWidth = 0;
+    let lastHeight = 0;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0 && (width !== lastWidth || height !== lastHeight)) {
+          lastWidth = width;
+          lastHeight = height;
+          requestAnimationFrame(() => this.render());
+        }
+      }
+    });
+    resizeObserver.observe(this.container);
   }
 
   private createControls(): HTMLElement {
@@ -248,7 +261,7 @@ export class MapComponent {
       'military',                                         // military tracking (flights + vessels)
       'cables', 'pipelines', 'outages', 'datacenters',   // infrastructure
       'ais', 'flights',                                   // transport
-      'earthquakes', 'weather',                           // natural
+      'natural', 'weather',                               // natural
       'economic',                                         // economic
       'countries', 'waterways',                           // labels
     ];
@@ -322,12 +335,12 @@ export class MapComponent {
         </div>
         <div class="layer-help-section">
           <div class="layer-help-title">Transport</div>
-          <div class="layer-help-item"><span>SHIPPING</span> Vessel tracking in chokepoints (Hormuz, Suez)</div>
+          <div class="layer-help-item"><span>SHIPPING</span> Vessels, chokepoints, 61 strategic ports</div>
           <div class="layer-help-item"><span>DELAYS</span> Airport delays and ground stops (FAA)</div>
         </div>
         <div class="layer-help-section">
           <div class="layer-help-title">Natural & Economic</div>
-          <div class="layer-help-item"><span>EARTHQUAKES</span> M4.5+ seismic events (time-filtered)</div>
+          <div class="layer-help-item"><span>NATURAL</span> Earthquakes (USGS) + storms, fires, volcanoes, floods (NASA EONET)</div>
           <div class="layer-help-item"><span>WEATHER</span> Severe weather alerts</div>
           <div class="layer-help-item"><span>ECONOMIC</span> Stock exchanges & central banks</div>
         </div>
@@ -535,15 +548,11 @@ export class MapComponent {
 
   private async loadMapData(): Promise<void> {
     try {
-      const [worldResponse, usResponse] = await Promise.all([
-        fetch(MAP_URLS.world),
-        fetch(MAP_URLS.us),
-      ]);
-
+      const worldResponse = await fetch(MAP_URLS.world);
       this.worldData = await worldResponse.json();
-      this.usData = await usResponse.json();
-
       this.render();
+      // Re-render after layout stabilizes to catch full container width
+      requestAnimationFrame(() => requestAnimationFrame(() => this.render()));
     } catch (e) {
       console.error('Failed to load map data:', e);
     }
@@ -597,25 +606,24 @@ export class MapComponent {
     // Countries
     this.renderCountries(path);
 
-    // Layers (show on global and mena views)
-    const showGlobalLayers = this.state.view !== 'us';
-    if (this.state.layers.cables && showGlobalLayers) {
+    // Render map layers
+    if (this.state.layers.cables) {
       this.renderCables(projection);
     }
 
-    if (this.state.layers.pipelines && showGlobalLayers) {
+    if (this.state.layers.pipelines) {
       this.renderPipelines(projection);
     }
 
-    if (this.state.layers.conflicts && showGlobalLayers) {
+    if (this.state.layers.conflicts) {
       this.renderConflicts(projection);
     }
 
-    if (this.state.layers.ais && showGlobalLayers) {
+    if (this.state.layers.ais) {
       this.renderAisDensity(projection);
     }
 
-    if (this.state.layers.sanctions && showGlobalLayers) {
+    if (this.state.layers.sanctions) {
       this.renderSanctions();
     }
 
@@ -655,15 +663,7 @@ export class MapComponent {
   }
 
   private getProjection(width: number, height: number): d3.GeoProjection {
-    // US view uses Albers USA projection, all others use equirectangular world projection
-    if (this.state.view === 'us') {
-      return d3
-        .geoAlbersUsa()
-        .scale(width * 1.3)
-        .translate([width / 2, height / 2]);
-    }
-
-    // All global/regional views use equirectangular projection
+    // All views use equirectangular projection (regional framing via zoom/pan)
     return d3
       .geoEquirectangular()
       .scale(width / (2 * Math.PI))
@@ -684,43 +684,25 @@ export class MapComponent {
   }
 
   private renderCountries(path: d3.GeoPath): void {
-    if (this.state.view !== 'us' && this.worldData) {
-      const countries = topojson.feature(
-        this.worldData,
-        this.worldData.objects.countries
-      );
+    if (!this.worldData) return;
 
-      const features = 'features' in countries ? countries.features : [countries];
+    const countries = topojson.feature(
+      this.worldData,
+      this.worldData.objects.countries
+    );
 
-      this.svg
-        .selectAll('.country')
-        .data(features)
-        .enter()
-        .append('path')
-        .attr('class', 'country')
-        .attr('d', path as unknown as string)
-        .attr('fill', '#0d3028')
-        .attr('stroke', '#1a8060')
-        .attr('stroke-width', 0.7);
-    } else if (this.state.view === 'us' && this.usData) {
-      const states = topojson.feature(
-        this.usData,
-        this.usData.objects.states
-      );
+    const features = 'features' in countries ? countries.features : [countries];
 
-      const features = 'features' in states ? states.features : [states];
-
-      this.svg
-        .selectAll('.state')
-        .data(features)
-        .enter()
-        .append('path')
-        .attr('class', 'state')
-        .attr('d', path as unknown as string)
-        .attr('fill', '#0d3028')
-        .attr('stroke', '#1a8060')
-        .attr('stroke-width', 0.7);
-    }
+    this.svg
+      .selectAll('.country')
+      .data(features)
+      .enter()
+      .append('path')
+      .attr('class', 'country')
+      .attr('d', path as unknown as string)
+      .attr('fill', '#0d3028')
+      .attr('stroke', '#1a8060')
+      .attr('stroke-width', 0.7);
   }
 
   private renderCables(projection: d3.GeoProjection): void {
@@ -871,32 +853,28 @@ export class MapComponent {
   private renderOverlays(projection: d3.GeoProjection): void {
     this.overlays.innerHTML = '';
 
-    const isWorldView = this.state.view !== 'us';
-
-    // Global/MENA only overlays
-    if (isWorldView) {
-      // Country labels (rendered first so they appear behind other overlays)
-      if (this.state.layers.countries) {
-        this.renderCountryLabels(projection);
-      }
-
-      // Conflict zone labels (HTML overlay with counter-scaling)
-      if (this.state.layers.conflicts) {
-        this.renderConflictLabels(projection);
-      }
-
-      // Strategic waterways
-      if (this.state.layers.waterways) {
-        this.renderWaterways(projection);
-      }
-
-      if (this.state.layers.ais) {
-        this.renderAisDisruptions(projection);
-      }
-
-      // APT groups
-      this.renderAPTMarkers(projection);
+    // Country labels (rendered first so they appear behind other overlays)
+    if (this.state.layers.countries) {
+      this.renderCountryLabels(projection);
     }
+
+    // Conflict zone labels (HTML overlay with counter-scaling)
+    if (this.state.layers.conflicts) {
+      this.renderConflictLabels(projection);
+    }
+
+    // Strategic waterways
+    if (this.state.layers.waterways) {
+      this.renderWaterways(projection);
+    }
+
+    if (this.state.layers.ais) {
+      this.renderAisDisruptions(projection);
+      this.renderPorts(projection);
+    }
+
+    // APT groups
+    this.renderAPTMarkers(projection);
 
     // Nuclear facilities (always HTML - shapes convey status)
     if (this.state.layers.nuclear) {
@@ -1064,9 +1042,9 @@ export class MapComponent {
       });
     }
 
-    // Earthquakes (magnitude-based sizing)
-    if (this.state.layers.earthquakes) {
-      console.log('[Map] Rendering earthquakes. Total:', this.earthquakes.length, 'Layer enabled:', this.state.layers.earthquakes);
+    // Earthquakes (magnitude-based sizing) - part of NATURAL layer
+    if (this.state.layers.natural) {
+      console.log('[Map] Rendering earthquakes. Total:', this.earthquakes.length, 'Layer enabled:', this.state.layers.natural);
       const filteredQuakes = this.filterByTime(this.earthquakes);
       console.log('[Map] After time filter:', filteredQuakes.length, 'earthquakes. TimeRange:', this.state.timeRange);
       let rendered = 0;
@@ -1219,7 +1197,7 @@ export class MapComponent {
     }
 
     // Cable advisories & repair ships
-    if (this.state.layers.cables && isWorldView) {
+    if (this.state.layers.cables) {
       this.cableAdvisories.forEach((advisory) => {
         const pos = projection([advisory.lon, advisory.lat]);
         if (!pos) return;
@@ -1606,6 +1584,51 @@ export class MapComponent {
         this.overlays.appendChild(div);
       });
     }
+
+    // Natural Events (NASA EONET) - part of NATURAL layer
+    if (this.state.layers.natural) {
+      this.naturalEvents.forEach((event) => {
+        const pos = projection([event.lon, event.lat]);
+        if (!pos) return;
+
+        const div = document.createElement('div');
+        div.className = `nat-event-marker ${event.category}`;
+        div.style.left = `${pos[0]}px`;
+        div.style.top = `${pos[1]}px`;
+
+        const icon = document.createElement('div');
+        icon.className = 'nat-event-icon';
+        icon.textContent = getNaturalEventIcon(event.category);
+        div.appendChild(icon);
+
+        if (this.state.zoom >= 2) {
+          const label = document.createElement('div');
+          label.className = 'nat-event-label';
+          label.textContent = event.title.length > 25 ? event.title.slice(0, 25) + '…' : event.title;
+          div.appendChild(label);
+        }
+
+        if (event.magnitude) {
+          const mag = document.createElement('div');
+          mag.className = 'nat-event-magnitude';
+          mag.textContent = `${event.magnitude}${event.magnitudeUnit ? ` ${event.magnitudeUnit}` : ''}`;
+          div.appendChild(mag);
+        }
+
+        div.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const rect = this.container.getBoundingClientRect();
+          this.popup.show({
+            type: 'natEvent',
+            data: event,
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+          });
+        });
+
+        this.overlays.appendChild(div);
+      });
+    }
   }
 
   private renderCountryLabels(projection: d3.GeoProjection): void {
@@ -1711,6 +1734,41 @@ export class MapComponent {
         .attr('fill', color)
         .attr('fill-opacity', fillOpacity)
         .attr('stroke', 'none');
+    });
+  }
+
+  private renderPorts(projection: d3.GeoProjection): void {
+    PORTS.forEach((port) => {
+      const pos = projection([port.lon, port.lat]);
+      if (!pos) return;
+
+      const div = document.createElement('div');
+      div.className = `port-marker port-${port.type}`;
+      div.style.left = `${pos[0]}px`;
+      div.style.top = `${pos[1]}px`;
+
+      const icon = document.createElement('div');
+      icon.className = 'port-icon';
+      icon.textContent = port.type === 'naval' ? '⚓' : port.type === 'oil' || port.type === 'lng' ? '🛢️' : '🏭';
+      div.appendChild(icon);
+
+      const label = document.createElement('div');
+      label.className = 'port-label';
+      label.textContent = port.name;
+      div.appendChild(label);
+
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rect = this.container.getBoundingClientRect();
+        this.popup.show({
+          type: 'port',
+          data: port,
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        });
+      });
+
+      this.overlays.appendChild(div);
     });
   }
 
@@ -1840,15 +1898,16 @@ export class MapComponent {
     this.state.view = view;
 
     // Region-specific zoom and pan settings
+    // Pan values shift view: +x shows west, -x shows east, +y shows north, -y shows south
     const viewSettings: Record<MapView, { zoom: number; pan: { x: number; y: number } }> = {
-      global: { zoom: 1, pan: { x: 0, y: 60 } },
-      us: { zoom: 2.5, pan: { x: 350, y: 120 } },
-      mena: { zoom: 2.5, pan: { x: -180, y: 60 } },
-      eu: { zoom: 2.8, pan: { x: 30, y: 20 } },
-      asia: { zoom: 2.2, pan: { x: -350, y: 80 } },
-      latam: { zoom: 2, pan: { x: 200, y: -80 } },
-      africa: { zoom: 2.2, pan: { x: -20, y: -40 } },
-      oceania: { zoom: 2.5, pan: { x: -450, y: -120 } },
+      global: { zoom: 1, pan: { x: 0, y: 30 } },
+      america: { zoom: 1.8, pan: { x: 220, y: 60 } },
+      mena: { zoom: 2.8, pan: { x: -100, y: 60 } },
+      eu: { zoom: 3.2, pan: { x: -25, y: 180 } },
+      asia: { zoom: 2.2, pan: { x: -200, y: 70 } },
+      latam: { zoom: 2.2, pan: { x: 150, y: -50 } },
+      africa: { zoom: 2.2, pan: { x: -30, y: 0 } },
+      oceania: { zoom: 2.8, pan: { x: -280, y: -60 } },
     };
 
     const settings = viewSettings[view];
@@ -1859,7 +1918,7 @@ export class MapComponent {
   }
 
   private static readonly ASYNC_DATA_LAYERS: Set<keyof MapLayers> = new Set([
-    'earthquakes', 'weather', 'outages', 'ais', 'protests', 'flights', 'military',
+    'natural', 'weather', 'outages', 'ais', 'protests', 'flights', 'military',
   ]);
 
   public toggleLayer(layer: keyof MapLayers): void {
@@ -2133,15 +2192,11 @@ export class MapComponent {
     const zoom = this.state.zoom;
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
-    const mapHeight = width / 2; // Equirectangular 2:1 ratio
 
-    // Horizontal: at zoom 1, no pan. At higher zooms, allow proportional pan
-    const maxPanX = ((zoom - 1) / zoom) * (width / 2);
-
-    // Vertical: allow panning to see poles if map extends beyond container
-    const extraVertical = Math.max(0, (mapHeight - height) / 2);
-    const zoomPanY = ((zoom - 1) / zoom) * (height / 2);
-    const maxPanY = extraVertical + zoomPanY;
+    // Allow generous panning - maps should be explorable
+    // Scale limits with zoom to allow reaching edges at higher zoom
+    const maxPanX = (width / 2) * Math.max(1, zoom * 0.8);
+    const maxPanY = (height / 2) * Math.max(1, zoom * 0.8);
 
     this.state.pan.x = Math.max(-maxPanX, Math.min(maxPanX, this.state.pan.x));
     this.state.pan.y = Math.max(-maxPanY, Math.min(maxPanY, this.state.pan.y));
@@ -2150,7 +2205,17 @@ export class MapComponent {
   private applyTransform(): void {
     this.clampPan();
     const zoom = this.state.zoom;
-    this.wrapper.style.transform = `scale(${zoom}) translate(${this.state.pan.x}px, ${this.state.pan.y}px)`;
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+
+    // With transform-origin: 0 0, we need to offset to keep center in view
+    // Formula: translate first to re-center, then scale
+    const centerOffsetX = (width / 2) * (1 - zoom);
+    const centerOffsetY = (height / 2) * (1 - zoom);
+    const tx = centerOffsetX + this.state.pan.x * zoom;
+    const ty = centerOffsetY + this.state.pan.y * zoom;
+
+    this.wrapper.style.transform = `translate(${tx}px, ${ty}px) scale(${zoom})`;
 
     // Set CSS variable for counter-scaling labels/markers
     // Labels: max 1.5x scale, so counter-scale = min(1.5, zoom) / zoom
@@ -2368,6 +2433,11 @@ export class MapComponent {
   public setMilitaryVessels(vessels: MilitaryVessel[], clusters: MilitaryVesselCluster[] = []): void {
     this.militaryVessels = vessels;
     this.militaryVesselClusters = clusters;
+    this.render();
+  }
+
+  public setNaturalEvents(events: NaturalEvent[]): void {
+    this.naturalEvents = events;
     this.render();
   }
 

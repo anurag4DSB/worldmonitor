@@ -2,9 +2,12 @@
 
 Real-time global intelligence dashboard aggregating news, markets, geopolitical data, and infrastructure monitoring into a unified situation awareness interface.
 
+🌐 **[Live Demo: worldmonitor.app](https://worldmonitor.app)**
+
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white)
 ![D3.js](https://img.shields.io/badge/D3.js-F9A03C?style=flat&logo=d3.js&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.3.2-blue)
 
 ![World Monitor Dashboard](Screenshot.png)
 
@@ -46,7 +49,7 @@ Layers are organized into logical groups for efficient monitoring:
 **Transport**
 | Layer | Description |
 |-------|-------------|
-| **Ships (AIS)** | Live vessel tracking via AIS with chokepoint monitoring* |
+| **Ships (AIS)** | Live vessel tracking via AIS with chokepoint monitoring and 61 strategic ports* |
 | **Delays** | FAA airport delay status and ground stops |
 
 *\*AIS data via [AISStream.io](https://aisstream.io) uses terrestrial receivers with stronger coverage in European/Atlantic waters. Middle East, Asia, and open ocean coverage is limited. Satellite AIS providers (Spire, Kpler) offer global coverage but require commercial licenses.*
@@ -54,8 +57,8 @@ Layers are organized into logical groups for efficient monitoring:
 **Natural Events**
 | Layer | Description |
 |-------|-------------|
-| **Earthquakes** | Live USGS seismic data (M4.5+ global) |
-| **Weather Alerts** | NWS severe weather warnings |
+| **Natural** | USGS earthquakes (M4.5+) + NASA EONET events (storms, wildfires, volcanoes, floods) |
+| **Weather** | NWS severe weather warnings |
 
 **Economic & Labels**
 | Layer | Description |
@@ -63,6 +66,20 @@ Layers are organized into logical groups for efficient monitoring:
 | **Economic** | FRED indicators panel (Fed assets, rates, yields) |
 | **Countries** | Country boundary labels |
 | **Waterways** | Strategic waterways and chokepoints |
+
+### Intelligence Panels
+
+Beyond raw data feeds, the dashboard provides synthesized intelligence panels:
+
+| Panel | Purpose |
+|-------|---------|
+| **Strategic Risk Overview** | Composite risk score combining all intelligence modules |
+| **Country Instability Index** | Real-time stability scores for 20 monitored countries |
+| **Infrastructure Cascade** | Dependency analysis for cables, pipelines, and chokepoints |
+| **Live Intelligence** | GDELT-powered topic feeds (Military, Cyber, Nuclear, Sanctions) |
+| **Intel Feed** | Curated defense and security news sources |
+
+These panels transform raw signals into actionable intelligence by applying scoring algorithms, trend detection, and cross-source correlation.
 
 ### News Aggregation
 
@@ -252,6 +269,265 @@ This creates a dynamic "heat map" of global attention based on live news flow.
 
 ---
 
+## Country Instability Index (CII)
+
+The dashboard maintains a **real-time instability score** for 20 strategically significant countries. Rather than relying on static risk ratings, the CII dynamically reflects current conditions based on multiple input streams.
+
+### Monitored Countries (Tier 1)
+
+| Region | Countries |
+|--------|-----------|
+| **Americas** | United States, Venezuela |
+| **Europe** | Germany, France, United Kingdom, Poland |
+| **Eastern Europe** | Russia, Ukraine |
+| **Middle East** | Iran, Israel, Saudi Arabia, Turkey, Syria, Yemen |
+| **Asia-Pacific** | China, Taiwan, North Korea, India, Pakistan, Myanmar |
+
+### Three Component Scores
+
+Each country's CII is computed from three weighted components:
+
+| Component | Weight | Data Sources | What It Measures |
+|-----------|--------|--------------|------------------|
+| **Unrest** | 40% | ACLED protests, GDELT events | Civil unrest intensity, fatalities, event severity |
+| **Security** | 30% | Military flights, naval vessels | Unusual military activity patterns |
+| **Information** | 30% | News velocity, alert clusters | Media attention intensity and acceleration |
+
+### Scoring Algorithm
+
+```
+Unrest Score:
+  base = min(50, protest_count × 8)
+  fatality_boost = min(30, total_fatalities × 5)
+  severity_boost = min(20, high_severity_count × 10)
+  unrest = min(100, base + fatality_boost + severity_boost)
+
+Security Score:
+  flight_score = min(50, military_flights × 3)
+  vessel_score = min(30, naval_vessels × 5)
+  security = min(100, flight_score + vessel_score)
+
+Information Score:
+  base = min(40, news_count × 5)
+  velocity_boost = min(40, avg_velocity × 10)
+  alert_boost = 20 if any_alert else 0
+  information = min(100, base + velocity_boost + alert_boost)
+
+Final CII = round(unrest × 0.4 + security × 0.3 + information × 0.3)
+```
+
+### Instability Levels
+
+| Level | Score Range | Visual | Meaning |
+|-------|-------------|--------|---------|
+| **Critical** | 81-100 | Red | Active crisis or major escalation |
+| **High** | 66-80 | Orange | Significant instability requiring close monitoring |
+| **Elevated** | 51-65 | Yellow | Above-normal activity patterns |
+| **Normal** | 31-50 | Gray | Baseline geopolitical activity |
+| **Low** | 0-30 | Green | Unusually quiet period |
+
+### Trend Detection
+
+The CII tracks 24-hour changes to identify trajectory:
+- **Rising**: Score increased by ≥5 points (escalating situation)
+- **Stable**: Change within ±5 points (steady state)
+- **Falling**: Score decreased by ≥5 points (de-escalation)
+
+### Keyword Attribution
+
+Countries are matched to data via keyword lists:
+- **Russia**: `russia`, `moscow`, `kremlin`, `putin`
+- **China**: `china`, `beijing`, `xi jinping`, `prc`
+- **Taiwan**: `taiwan`, `taipei`
+
+This enables attribution of news and events to specific countries even when formal country codes aren't present in the source data.
+
+---
+
+## Geographic Convergence Detection
+
+One of the most valuable intelligence signals is when **multiple independent data streams converge on the same geographic area**. This often precedes significant events.
+
+### How It Works
+
+The system maintains a real-time grid of geographic cells (1° × 1° resolution). Each cell tracks four event types:
+
+| Event Type | Source | Detection Method |
+|------------|--------|-----------------|
+| **Protests** | ACLED/GDELT | Direct geolocation |
+| **Military Flights** | OpenSky | ADS-B position |
+| **Naval Vessels** | AIS stream | Ship position |
+| **Earthquakes** | USGS | Epicenter location |
+
+When **3 or more different event types** occur within the same cell during a 24-hour window, a **convergence alert** is generated.
+
+### Convergence Scoring
+
+```
+type_score = event_types × 25      # Max 100 (4 types)
+count_boost = min(25, total_events × 2)
+convergence_score = min(100, type_score + count_boost)
+```
+
+### Alert Thresholds
+
+| Types Converging | Score Range | Alert Level |
+|-----------------|-------------|-------------|
+| **4 types** | 80-100 | Critical |
+| **3 types** | 60-80 | High |
+| **3 types** (low count) | 40-60 | Medium |
+
+### Example Scenarios
+
+**Taiwan Strait Buildup**
+- Cell: `25°N, 121°E`
+- Events: Military flights (3), Naval vessels (2), Protests (1)
+- Score: 75 + 12 = 87 (Critical)
+- Signal: "Geographic Convergence (3 types) - military flights, naval vessels, protests"
+
+**Middle East Flashpoint**
+- Cell: `32°N, 35°E`
+- Events: Military flights (5), Protests (8), Earthquake (1)
+- Score: 75 + 25 = 100 (Critical)
+- Signal: Multiple activity streams converging on region
+
+### Why This Matters
+
+Individual data points are often noise. But when **protests break out, military assets reposition, and seismic monitors detect anomalies** in the same location simultaneously, it warrants attention—regardless of whether any single source is reporting a crisis.
+
+---
+
+## Infrastructure Cascade Analysis
+
+Critical infrastructure is interdependent. A cable cut doesn't just affect connectivity—it creates cascading effects across dependent countries and systems. The cascade analysis system visualizes these dependencies.
+
+### Dependency Graph
+
+The system builds a graph of **279 infrastructure nodes** and **280 dependency edges**:
+
+| Node Type | Count | Examples |
+|-----------|-------|----------|
+| **Undersea Cables** | 18 | MAREA, FLAG Europe-Asia, SEA-ME-WE 6 |
+| **Pipelines** | 88 | Nord Stream, Trans-Siberian, Keystone |
+| **Ports** | 61 | Singapore, Rotterdam, Shenzhen |
+| **Chokepoints** | 8 | Suez, Hormuz, Malacca |
+| **Countries** | 105 | End nodes representing national impact |
+
+### Cascade Calculation
+
+When a user selects an infrastructure asset for analysis, a **breadth-first cascade** propagates through the graph:
+
+```
+1. Start at source node (e.g., "cable:marea")
+2. For each dependent node:
+   impact = edge_strength × disruption_level × (1 - redundancy)
+3. Categorize impact:
+   - Critical: impact > 0.8
+   - High: impact > 0.5
+   - Medium: impact > 0.2
+   - Low: impact ≤ 0.2
+4. Recurse to depth 3 (prevent infinite loops)
+```
+
+### Redundancy Modeling
+
+The system accounts for alternative routes:
+- Cables with high redundancy show reduced impact
+- Countries with multiple cable landings show lower vulnerability
+- Alternative routes are displayed with capacity percentages
+
+### Example Analysis
+
+**MAREA Cable Disruption**:
+```
+Source: MAREA (US ↔ Spain, 200 Tbps)
+Countries Affected: 4
+- Spain: Medium (redundancy via other Atlantic cables)
+- Portugal: Low (secondary landing)
+- France: Low (alternative routes via UK)
+- US: Low (high redundancy)
+Alternative Routes: TAT-14 (35%), Hibernia (22%), AEConnect (18%)
+```
+
+**FLAG Europe-Asia Disruption**:
+```
+Source: FLAG Europe-Asia (UK ↔ Japan)
+Countries Affected: 7
+- India: Medium (major capacity share)
+- UAE, Saudi Arabia: Medium (limited alternatives)
+- UK, Japan: Low (high redundancy)
+Alternative Routes: SEA-ME-WE 6 (11%), 2Africa (8%), Falcon (8%)
+```
+
+### Use Cases
+
+- **Pre-positioning**: Understand which countries are most vulnerable to specific infrastructure failures
+- **Risk Assessment**: Evaluate supply chain exposure to chokepoint disruptions
+- **Incident Response**: Quickly identify downstream effects of reported cable cuts or pipeline damage
+
+---
+
+## Strategic Risk Overview
+
+The Strategic Risk Overview provides a **composite dashboard** that synthesizes all intelligence modules into a single risk assessment.
+
+### Composite Score (0-100)
+
+The strategic risk score combines three components:
+
+| Component | Weight | Calculation |
+|-----------|--------|-------------|
+| **Convergence** | 40% | `min(100, convergence_zones × 20)` |
+| **CII Deviation** | 35% | `min(100, avg_deviation × 2)` |
+| **Infrastructure** | 25% | `min(100, incidents × 25)` |
+
+### Risk Levels
+
+| Score | Level | Trend Icon | Meaning |
+|-------|-------|------------|---------|
+| 70-100 | **Critical** | 📈 Escalating | Multiple converging crises |
+| 50-69 | **Elevated** | ➡️ Stable | Heightened global tension |
+| 30-49 | **Moderate** | ➡️ Stable | Normal fluctuation |
+| 0-29 | **Low** | 📉 De-escalating | Unusually quiet period |
+
+### Unified Alert System
+
+Alerts from all modules are merged using **temporal and spatial deduplication**:
+
+- **Time window**: Alerts within 2 hours may be merged
+- **Distance threshold**: Alerts within 200km may be merged
+- **Same country**: Alerts affecting the same country may be merged
+
+When alerts merge, they become **composite alerts** that show the full picture:
+
+```
+Type: Composite Alert
+Title: Convergence + CII + Infrastructure: Ukraine
+Components:
+  - Geographic Convergence: 4 event types in Kyiv region
+  - CII Spike: Ukraine +15 points (Critical)
+  - Infrastructure: Black Sea cables at risk
+Priority: Critical
+```
+
+### Alert Priority
+
+| Priority | Criteria |
+|----------|----------|
+| **Critical** | CII critical level, convergence score ≥80, cascade critical impact |
+| **High** | CII high level, convergence score ≥60, cascade affecting ≥5 countries |
+| **Medium** | CII change ≥10 points, convergence score ≥40 |
+| **Low** | Minor changes and low-impact events |
+
+### Trend Detection
+
+The system tracks the composite score over time:
+- First measurement establishes baseline (shows "Stable")
+- Subsequent changes of ±5 points trigger trend changes
+- This prevents false "escalating" signals on initialization
+
+---
+
 ## Pentagon Pizza Index (PizzINT)
 
 The dashboard integrates real-time foot traffic data from strategic locations near government and military facilities. This "Pizza Index" concept—tracking late-night activity spikes at restaurants near the Pentagon, Langley, and other facilities—provides an unconventional indicator of crisis activity.
@@ -381,7 +657,7 @@ Each panel maintains independent activity state:
 - **News**: New clusters since last view
 - **Markets**: Price changes exceeding thresholds
 - **Predictions**: Probability shifts >5%
-- **Earthquakes**: New seismic events
+- **Natural Events**: New earthquakes and EONET events
 
 This enables focused monitoring—you can collapse panels you've reviewed and see at a glance which have new activity.
 
@@ -500,7 +776,12 @@ Vessels within 50km of these bases are flagged, enabling detection of unusual ac
 
 ### Aircraft Tracking (OpenSky)
 
-Military aircraft are tracked via the OpenSky Network using ADS-B data:
+Military aircraft are tracked via the OpenSky Network using ADS-B data. OpenSky blocks unauthenticated requests from cloud provider IPs (Vercel, Railway, AWS), so aircraft tracking requires a relay server with credentials.
+
+**Authentication**:
+- Register for a free account at [opensky-network.org](https://opensky-network.org)
+- Create an API client in account settings to get `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET`
+- The relay uses Basic Auth with these credentials to bypass cloud IP blocks
 
 **Identification Methods**:
 - **Callsign matching**: Known military callsign patterns (RCH, REACH, DUKE, etc.)
@@ -844,6 +1125,7 @@ The dashboard fetches data from various public APIs and data sources:
 | Yahoo Finance | Stock indices & commodities (backup) | No |
 | CoinGecko | Cryptocurrency prices | No |
 | USGS | Earthquake data | No |
+| NASA EONET | Natural events (storms, fires, volcanoes, floods) | No |
 | NWS | Weather alerts | No |
 | FRED | Economic indicators (Fed data) | No |
 | Polymarket | Prediction markets | No |
@@ -864,7 +1146,9 @@ Some features require API credentials. Without them, the corresponding layer is 
 |----------|---------|------------|
 | `FINNHUB_API_KEY` | Stock quotes (primary) | Free registration at [finnhub.io](https://finnhub.io/) |
 | `VITE_WS_RELAY_URL` | AIS vessel tracking | Deploy AIS relay or use hosted service |
-| `VITE_OPENSKY_RELAY_URL` | Military aircraft | Deploy OpenSky relay (rate limit bypass) |
+| `VITE_OPENSKY_RELAY_URL` | Military aircraft | Deploy relay with OpenSky credentials |
+| `OPENSKY_CLIENT_ID` | OpenSky auth (relay) | Free registration at [opensky-network.org](https://opensky-network.org) |
+| `OPENSKY_CLIENT_SECRET` | OpenSky auth (relay) | API key from OpenSky account settings |
 | `CLOUDFLARE_API_TOKEN` | Internet outages | Free Cloudflare account with Radar access |
 | `ACLED_ACCESS_TOKEN` | Protest data (server-side) | Free registration at acleddata.com |
 
@@ -889,11 +1173,15 @@ src/
 │   ├── NewsPanel.ts          # News feed with clustering
 │   ├── MarketPanel.ts        # Stock/commodity display
 │   ├── MonitorPanel.ts       # Custom keyword monitors
+│   ├── CIIPanel.ts           # Country Instability Index display
+│   ├── CascadePanel.ts       # Infrastructure cascade analysis
+│   ├── StrategicRiskPanel.ts # Strategic risk overview dashboard
 │   └── ...
 ├── config/
 │   ├── feeds.ts              # 45+ RSS feeds, source tiers
 │   ├── geo.ts                # Hotspots, conflicts, 55 cables, waterways
 │   ├── pipelines.ts          # 88 oil & gas pipelines
+│   ├── ports.ts              # 61 strategic ports worldwide
 │   ├── bases-expanded.ts     # 220+ military bases
 │   ├── ai-datacenters.ts     # 313 AI clusters (filtered to 111)
 │   ├── airports.ts           # 30 monitored US airports
@@ -912,6 +1200,7 @@ src/
 │   ├── rss.ts                # RSS parsing with circuit breakers
 │   ├── markets.ts            # Finnhub, Yahoo Finance, CoinGecko
 │   ├── earthquakes.ts        # USGS integration
+│   ├── eonet.ts              # NASA EONET natural events
 │   ├── weather.ts            # NWS alerts
 │   ├── fred.ts               # Federal Reserve data
 │   ├── polymarket.ts         # Prediction markets (filtered)
@@ -921,7 +1210,11 @@ src/
 │   ├── related-assets.ts     # Infrastructure near news events
 │   ├── activity-tracker.ts   # New item detection & highlighting
 │   ├── analysis-worker.ts    # Web Worker manager
-│   └── storage.ts            # IndexedDB snapshots & baselines
+│   ├── storage.ts            # IndexedDB snapshots & baselines
+│   ├── country-instability.ts    # CII scoring algorithm
+│   ├── geo-convergence.ts        # Geographic convergence detection
+│   ├── infrastructure-cascade.ts # Dependency graph and cascade analysis
+│   └── cross-module-integration.ts # Unified alerts and strategic risk
 ├── workers/
 │   └── analysis.worker.ts    # Off-thread clustering & correlation
 ├── utils/
@@ -996,9 +1289,11 @@ Aggregates **45+ RSS feeds** from major news outlets, government sources, and sp
 - **Nuclear**: 100+ power plants, weapons labs, enrichment facilities
 - **AI Infrastructure**: 111 major compute clusters (≥10k GPUs)
 - **Strategic Waterways**: 8 critical chokepoints
+- **Ports**: 61 strategic ports (container, oil/LNG, naval, chokepoint)
 
 ### Live APIs
 - **USGS**: Earthquake feed (M4.5+ global)
+- **NASA EONET**: Natural events (storms, wildfires, volcanoes, floods)
 - **NWS**: Severe weather alerts (US)
 - **FAA**: Airport delays and ground stops
 - **Cloudflare Radar**: Internet outage detection
@@ -1029,6 +1324,7 @@ Data provided by [The OpenSky Network](https://opensky-network.org). If you use 
 
 ### Geophysical Data
 - **Earthquakes**: [U.S. Geological Survey](https://earthquake.usgs.gov/), ANSS Comprehensive Catalog
+- **Natural Events**: [NASA EONET](https://eonet.gsfc.nasa.gov/) - Earth Observatory Natural Event Tracker (storms, wildfires, volcanoes, floods)
 - **Weather Alerts**: [National Weather Service](https://www.weather.gov/) - Open data, free to use
 
 ### Infrastructure & Transport
@@ -1074,6 +1370,42 @@ Some publishers block requests from cloud providers (Vercel, Railway, AWS):
 - Affected feeds are automatically disabled via circuit breakers
 
 The system degrades gracefully—blocked sources are skipped while others continue functioning.
+
+---
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for detailed planning. Recent intelligence enhancements:
+
+### Completed
+
+- ✅ **Multi-Signal Geographic Convergence** - Alerts when 3+ data types converge on same region within 24h
+- ✅ **Country Instability Index (CII)** - Real-time composite risk score for 20 Tier-1 countries
+- ✅ **Infrastructure Cascade Visualization** - Dependency graph showing downstream effects of disruptions
+- ✅ **Strategic Risk Overview** - Unified alert system with cross-module correlation and deduplication
+- ✅ **GDELT Topic Intelligence** - Categorized feeds for military, cyber, nuclear, and sanctions topics
+- ✅ **OpenSky Authentication** - OAuth2 credentials for military aircraft tracking via relay
+- ✅ **Human-Readable Locations** - Convergence alerts show place names instead of coordinates
+- ✅ **Data Freshness Tracking** - Status panel shows enabled/disabled state for all feeds
+
+### Planned
+
+**High Priority:**
+- **Temporal Anomaly Detection** - Flag activity unusual for time of day/week/year (e.g., "military flights 3x normal for Tuesday")
+- **Trade Route Risk Scoring** - Real-time supply chain vulnerability for major shipping routes (Asia→Europe, Middle East→Europe, etc.)
+
+**Medium Priority:**
+- **Historical Playback** - Review past dashboard states with timeline scrubbing
+- **Election Calendar Integration** - Auto-boost sensitivity 30 days before major elections
+- **Choropleth CII Map Layer** - Country-colored overlay showing instability scores
+
+**Future Enhancements:**
+- **Alert Webhooks** - Push critical alerts to Slack, Discord, email
+- **Custom Country Watchlists** - User-defined Tier-2 country monitoring
+- **Additional Data Sources** - World Bank, IMF, OFAC sanctions, UNHCR refugee data, FAO food security
+- **Think Tank Feeds** - RUSI, Chatham House, ECFR, CFR, Wilson Center, CNAS, Arms Control Association
+
+The full [ROADMAP.md](ROADMAP.md) documents implementation details, API endpoints, and 30+ free data sources for future integration.
 
 ---
 

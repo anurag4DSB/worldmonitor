@@ -10,7 +10,6 @@ const LAYER_KEYS: (keyof MapLayers)[] = [
   'nuclear',
   'irradiators',
   'sanctions',
-  'earthquakes',
   'weather',
   'economic',
   'countries',
@@ -18,10 +17,11 @@ const LAYER_KEYS: (keyof MapLayers)[] = [
   'outages',
   'datacenters',
   'flights',
+  'natural',
 ];
 
 const TIME_RANGES: TimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
-const VIEW_VALUES: MapView[] = ['global', 'us', 'mena', 'eu', 'asia', 'latam', 'africa', 'oceania'];
+const VIEW_VALUES: MapView[] = ['global', 'america', 'mena', 'eu', 'asia', 'latam', 'africa', 'oceania'];
 
 export interface ParsedMapUrlState {
   view?: MapView;
